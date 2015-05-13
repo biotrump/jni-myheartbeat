@@ -167,12 +167,13 @@ esac
 #pushd ${DSPLIB_OUT}
 
 #if current folder is jni, NDK_PROJECT_PATH is not explicitly defined!!!
+#NDK_LOG=1 V=1
 case $ARCHI in
   arm)
-	${ANDROID_NDK}/ndk-build NDK_LOG=1 V=1 NDK_PROJECT_PATH=.  NDK_APPLICATION_MK=./Application.mk
+	${ANDROID_NDK}/ndk-build  NDK_PROJECT_PATH=.  NDK_APPLICATION_MK=./Application.mk
 	;;
   x86)
-	${ANDROID_NDK}/ndk-build NDK_LOG=1 V=1 NDK_PROJECT_PATH=.  NDK_APPLICATION_MK=./Application.mk
+	${ANDROID_NDK}/ndk-build  NDK_PROJECT_PATH=.  NDK_APPLICATION_MK=./Application.mk
   ;;
   mips)
   ;;

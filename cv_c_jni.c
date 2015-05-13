@@ -228,7 +228,7 @@ void SaveTimeStamp()
 void GetFilename(char *szFilename)
 {
     InitCount++;
-    sprintf(szFilename, "/mnt/sdcard/DCIM/100MEDIA/%ld-%d.yuv", InitTime, InitCount);
+    sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/%ld-%d.yuv", InitTime, InitCount);
     LOGI("%s", szFilename) ;
 }
 
@@ -311,7 +311,7 @@ jboolean Java_com_biotrump_myheartbeat_cv_NativeJNI_ctSendImage( JNIEnv* pEnv, j
     LOGI("NativeJNI: Image length:%d", nlength);
     GetFilename(szFilename);
 
-    // xwrite( szFilename, 0, pNativeSource, nlength) ;
+    //xwrite( szFilename, 0, pNativeSource, nlength) ;
 
     SendImage( pNativeSource, nlength);
 

@@ -63,9 +63,10 @@ boolean cbUpdateBreathing(int value, int max)
 
 boolean cbFaceDetected(boolean bDetect)
 {
-    boolean bResult = FALSE ;
+    LOGI("++%s: %d",__func__ ,bDetect);
+	boolean bResult = FALSE ;
+	return bResult;
     pthread_mutex_lock(&cbMutex) ;
-    LOGI("FaceDetected: %d", bDetect);
     bResult = Native_com_biotrump_myheartbeat_cv_NativeJNI_FaceDetected(bDetect) ;
     pthread_mutex_unlock(&cbMutex);
     return bResult ;
@@ -96,11 +97,6 @@ boolean Init()
 {
     LOGI("Init") ;
 
-	if(dsp_init(DEFAULT_FPS, DEFAULT_WINSTEP, DEFAULT_MINWINTHR, DEFAULT_MAXWINTHR,
-		MAX_CHANNELS, &cblist,1)){
-		LOGE("DSP init failed!!!\n");
-		return FALSE;
-	}
     // Init Update HeartRate Thread
 #if 0
     if (pthread_create(&thUpdateHeartRate, NULL, thread_UpdateHeartRate,
@@ -148,13 +144,21 @@ boolean IsReady()
     return bIsReady ;
 }
 
+/*
+ * dsp init should be here
+ */
 void SetImageResolution(int width, int height)
 {
+	LOGI("%s: %d, get image resolution width:%d, height:%d", __func__,
+		 bIsReady, width, height);
     if( !bIsReady )
         return ;
-	win_width=width;
-	win_height=height;
-    LOGI("SetImageResolution: get image resolution width:%d, height:%d", width, height);
+	win_width=height;
+	win_height=width;
+	if(dsp_init(DEFAULT_FPS, DEFAULT_WINSTEP, DEFAULT_MINWINTHR, DEFAULT_MAXWINTHR,
+		MAX_CHANNELS, &cblist,1)){
+		LOGE("DSP init failed!!!\n");
+	}
 }
 
 void SetCameraInfo(boolean bTBD)
@@ -172,40 +176,62 @@ void SetCameraInfo(boolean bTBD)
  * 		nface : the detected faces which is no over than the MAX_FACES
  * return : the valid pulse rate
 */
-float processFrame(int sfmt, const void *p, int width, int height,
+float processFrame(unsigned sfmt, const void *p, int width, int height,
 	float band_min, float band_max, RECT *roi, int *nface
 )
 {
 	float mean_roi[MAX_CHANNELS]={0.0};
-	RECT roi_face;
-	int nd=0;
-	LOGI("%s: p=%p, %d, %d, fm=%.1f, fM=%.1f\n", __func__, p, width, height, band_min, band_max);
-
 	float rs[MAX_FACES],cs[MAX_FACES],ss[MAX_FACES];
 	unsigned char *imagedata_rgb=NULL, *imagedata_Y=NULL;
+	RECT roi_face;
+	int nd=0;
+	LOGI("%s: p=%p, fmt=0x%x, %d, %d, fm=%.1f, fM=%.1f\n", __func__, p,sfmt,
+		 width, height, band_min, band_max);
 
 	if(V4L2_PIX_FMT_MJPEG == sfmt){
 
 	}else if( (sfmt == V4L2_PIX_FMT_YUYV) /*|| (sfmt == V4L2_PIX_FMT_YVYU)*/ ||
 		(sfmt == V4L2_PIX_FMT_YUV422P)){
+
+		//LOGI("YUV422P YUYV");
 		imagedata_Y=(unsigned char *)malloc(width * height);
-		yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
+		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
+		//LOGI("---YUV422P YUYV");
 	}else if( (sfmt == V4L2_PIX_FMT_UYVY) /*|| (sfmt == V4L2_PIX_FMT_VYUY)*/ ){
+		//LOGI("YUV422P UYVY");
 		imagedata_Y=(unsigned char *)malloc(width * height);
-		yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
+		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
+		//LOGI("<<<YUV422P UYVY");
 	}else if( (sfmt == V4L2_PIX_FMT_YUV420) || (sfmt == V4L2_PIX_FMT_YVU420)){
+		//LOGI("YUV420 YVU420");
 		imagedata_Y=(unsigned char *)malloc(width * height);
-		yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
+		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
+		//LOGI("--YUV420 YVU420");
 	}else if( (sfmt == V4L2_PIX_FMT_NV21) ){
+		//LOGI("+++ NV21 YVU420sp");
+		/* counter clockwise rotate 90deg */
+		unsigned char *c90=(unsigned char *)malloc(width * height);
+		unsigned char *pb=(unsigned char *)p;
+		for(int i=0;i < height;i++)
+			for(int j=0;j<width;j++)
+				c90[width*(height - i - 1) + j]=pb[j*height + i];
 		imagedata_Y=(unsigned char *)malloc(width * height);
-		yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
-		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
+		//LOGI("***NV21 YVU420sp ++");
+		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
+		//LOGI("*****NV21 YVU420sp ++++");
+		//extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
+		extractY(sfmt, width, height, c90, imagedata_Y);
+		//LOGI("*****NV21 YVU420sp ++++");
 	}
 
 	if(imagedata_Y){
+		/*static int cnt=0;
+		char szFilename[100];
+		sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/yuv-%d.y", cnt++);
+		xwrite( szFilename, 0, imagedata_Y, width*height) ;*/
 		nd=pico_facedetection(imagedata_Y, width, height, MAX_FACES, rs, cs, ss);
 		LOGI("*nd=%d\n",nd);
 		//setup a rectangle ROI
@@ -222,9 +248,10 @@ float processFrame(int sfmt, const void *p, int width, int height,
 			*roi=roi_face;
 			*nface=1;	//only 1 face is returned
 			imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
+			//yuv_roi_to_rgb888(sfmt, roi_WIDTH, roi_HEIGHT, (unsigned char *)p, imagedata_rgb);
 			//callback to facedetection with RECT
-			if(cblist.cbFaceDetected)
-				cblist.cbFaceDetected(1);
+			/*if(cblist.cbFaceDetected)
+				cblist.cbFaceDetected(1);*/
 		}else{//dummy ROI
 			int roi_WIDTH = (width>>2);	//160
 			int roi_HEIGHT = (height/3);	//160
@@ -233,13 +260,16 @@ float processFrame(int sfmt, const void *p, int width, int height,
 			roi_face.y = (height - roi_HEIGHT)/2 - 1+ roi_Y_OFFSET;
 			roi_face.width = roi_WIDTH;
 			roi_face.height = roi_HEIGHT;
-			if(cblist.cbFaceDetected)
-				cblist.cbFaceDetected(0);
+			*nface=0;	//only 1 face is returned
+			imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
+			/*if(cblist.cbFaceDetected)
+				cblist.cbFaceDetected(0);*/
 		}
 		MATRIX img={height, width, imagedata_rgb };
-
+		LOGI("roi=(x=%d,y=%d, w=%d,h=%d)", roi_face.x, roi_face.y, roi_face.width,
+			 roi_face.height);
 		//RGB mean value in the RECT roi
-		roiMean(MAX_CHANNELS, &img, roi_face, mean_roi);
+		//roiMean(MAX_CHANNELS, &img, roi_face, mean_roi);
 		//LOGI("mean_roi(%.4f,%.4f,%.4f)\n", mean_roi[0],mean_roi[1],mean_roi[2]);
 		if(imagedata_Y)
 			free(imagedata_Y);
@@ -263,15 +293,16 @@ float processFrame(int sfmt, const void *p, int width, int height,
 
 void SendImage(char *pSource, int length)
 {
+	LOGI("+%s: get image with length: %d", __func__, length);
     if( !bIsReady )
         return ;
-	unsigned sfmt=V4L2_PIX_FMT_YUV420;
+	unsigned sfmt=V4L2_PIX_FMT_NV21;
 	RECT roi[MAX_FACES];
 	int nFace=0;
-	float pr = processFrame(V4L2_PIX_FMT_NV21, (void *)pSource, win_width, win_height,
+	float pr = processFrame(sfmt, (void *)pSource, win_width, win_height,
 	MIN_HR_BPM, MAX_HR_BPM, roi, &nFace);
 
-    LOGI("SendImage: get image with length: %d", length);
+    //LOGI("SendImage: get image with length: %d", length);
 }
 
 #if 0

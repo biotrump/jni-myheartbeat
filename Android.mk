@@ -31,6 +31,7 @@ LOCAL_SHARED_LIBRARIES := libbcv-dsp-NDK-arm
 
 #LAPACKE to skip default complex.h whichis not found in NDK
 LOCAL_CFLAGS := \
+	-std=c99 \
 	-DHAVE_LAPACK_CONFIG_H  \
 	-DLAPACK_COMPLEX_STRUCTURE
 
