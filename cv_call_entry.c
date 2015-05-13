@@ -224,6 +224,7 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 		//LOGI("*****NV21 YVU420sp ++++");
 		//extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
 		extractY(sfmt, width, height, c90, imagedata_Y);
+		free(c90);
 		//LOGI("*****NV21 YVU420sp ++++");
 	}
 
@@ -247,7 +248,7 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 			roi_face.height = roi_HEIGHT ;
 			*roi=roi_face;
 			*nface=1;	//only 1 face is returned
-			imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
+			//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
 			//yuv_roi_to_rgb888(sfmt, roi_WIDTH, roi_HEIGHT, (unsigned char *)p, imagedata_rgb);
 			//callback to facedetection with RECT
 			/*if(cblist.cbFaceDetected)
@@ -261,7 +262,7 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 			roi_face.width = roi_WIDTH;
 			roi_face.height = roi_HEIGHT;
 			*nface=0;	//only 1 face is returned
-			imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
+			//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
 			/*if(cblist.cbFaceDetected)
 				cblist.cbFaceDetected(0);*/
 		}
@@ -273,9 +274,17 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 		//LOGI("mean_roi(%.4f,%.4f,%.4f)\n", mean_roi[0],mean_roi[1],mean_roi[2]);
 		if(imagedata_Y)
 			free(imagedata_Y);
-		if(imagedata_rgb)
-			free(imagedata_rgb);
 	}
+
+	/*
+	 * YUV to RGB test
+	 */
+	imagedata_rgb=(unsigned char *)malloc(width * height * 3);//RGB888
+	yuv_to_rgb888(sfmt, height, width, (unsigned char *)p, imagedata_rgb);
+	static int cnt=0;
+	char szFilename[100];
+	sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/yuv-%d.rgb", cnt++);
+	xwrite( szFilename, 0, imagedata_rgb, width*height*3);
 
 	float pr=0.0f;
 	if(nd){
@@ -287,6 +296,8 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 			pr = ppg[2];//return G's bpm
 		}
 	}
+	if(imagedata_rgb)
+		free(imagedata_rgb);
 
 	return pr;
 }
