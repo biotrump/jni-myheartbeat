@@ -25,8 +25,8 @@
 // common variable
 static boolean bIsReady = FALSE ;
 static boolean bExist = FALSE ;
-static int 	win_width = DEFAULT_WIDTH;
-static int 	win_height = DEFAULT_HEIGHT;
+static int 	win_width = 0;
+static int 	win_height = 0;
 
 /*
  * callback functions
@@ -153,11 +153,18 @@ void SetImageResolution(int width, int height)
 		 bIsReady, width, height);
     if( !bIsReady )
         return ;
-	win_width=height;
-	win_height=width;
-	if(dsp_init(DEFAULT_FPS, DEFAULT_WINSTEP, DEFAULT_MINWINTHR, DEFAULT_MAXWINTHR,
-		MAX_CHANNELS, &cblist,1)){
-		LOGE("DSP init failed!!!\n");
+
+	if ( (win_width != width) || (win_height!=height)){/* a new start */
+		if(win_width || win_height)
+			dsp_deinit();	//deinit the previous process
+		if(dsp_init(DEFAULT_FPS, DEFAULT_WINSTEP, DEFAULT_MINWINTHR, DEFAULT_MAXWINTHR,
+			MAX_CHANNELS, &cblist,1)){
+			LOGE("DSP init failed!!!\n");
+			win_width=win_height=0;
+			return;
+		}
+		win_width = width;
+		win_height = height;
 	}
 }
 
@@ -182,9 +189,12 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 {
 	float mean_roi[MAX_CHANNELS]={0.0};
 	float rs[MAX_FACES],cs[MAX_FACES],ss[MAX_FACES];
-	unsigned char *imagedata_rgb=NULL, *imagedata_Y=NULL;
+	unsigned char *imagedata_rgb=NULL, *imagedata_Y=NULL, *croppedYUV=NULL;
+	unsigned char *imagedata_Y_1_4=NULL;
 	RECT roi_face;
 	int nd=0;
+	int f_width=width, f_height=height;
+
 	LOGI("%s: p=%p, fmt=0x%x, %d, %d, fm=%.1f, fM=%.1f\n", __func__, p,sfmt,
 		 width, height, band_min, band_max);
 
@@ -211,73 +221,109 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
 		//LOGI("--YUV420 YVU420");
 	}else if( (sfmt == V4L2_PIX_FMT_NV21) ){
-		//LOGI("+++ NV21 YVU420sp");
-		/* counter clockwise rotate 90deg */
-		unsigned char *c90=(unsigned char *)malloc(width * height);
-		unsigned char *pb=(unsigned char *)p;
-		for(int i=0;i < height;i++)
-			for(int j=0;j<width;j++)
-				c90[width*(height - i - 1) + j]=pb[j*height + i];
-		imagedata_Y=(unsigned char *)malloc(width * height);
+		LOGI("+++ NV21 YVU420sp NV21");
+		//imagedata_Y=(unsigned char *)malloc(width * height);
+		imagedata_Y_1_4=(unsigned char *)malloc(width * height / 4);
 		//LOGI("***NV21 YVU420sp ++");
 		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		//LOGI("*****NV21 YVU420sp ++++");
 		//extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
-		extractY(sfmt, width, height, c90, imagedata_Y);
-		free(c90);
+		//extractY(sfmt, width, height, p, imagedata_Y);
+		/*
+		 * H flip + clockwise 90
+		 * or Vflip + counterclockwise 90
+		 * have the same geometry result!!!
+		 * width and height are half and transposed
+		 * so the imagedata_Y_1_4 is
+		 * row = width/2
+		 * width = height/2
+		 */
+		//downsampling_1_2( 0,  'h', 90, width, height,
+		//			(unsigned char *)p, imagedata_Y_1_4);
+		downsampling_1_2( 'v',  0, -90, width, height,
+					(unsigned char *)p, imagedata_Y_1_4);
+		f_width=height/2;
+		f_height=width/2;
+		LOGI("w=%d, y=%d, fw=%d,fh=%d", width, height, f_width, f_height	);
+#if 1
+	/*
+	 * YUV420sp to RGB888 test
+	 */
+	//imagedata_rgb=(unsigned char *)malloc(width * height * 3);//RGB888
+	//yuv_to_rgb888(sfmt, height, width, (unsigned char *)p, imagedata_rgb);
+	static int cnt=0;
+	char szFilename[100];
+	sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/Y-1-4-%d.y", cnt++);
+	xwrite( szFilename, 0, imagedata_Y_1_4, f_width*f_height);
+#endif
 		//LOGI("*****NV21 YVU420sp ++++");
 	}
 
-	if(imagedata_Y){
+	if(imagedata_Y_1_4 /*imagedata_Y*/){
 		/*static int cnt=0;
 		char szFilename[100];
 		sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/yuv-%d.y", cnt++);
 		xwrite( szFilename, 0, imagedata_Y, width*height) ;*/
-		nd=pico_facedetection(imagedata_Y, width, height, MAX_FACES, rs, cs, ss);
+		nd=pico_facedetection(imagedata_Y_1_4, f_width, f_height, MAX_FACES, rs, cs, ss);
 		LOGI("*nd=%d\n",nd);
 		//setup a rectangle ROI
 		if(nd){//sqrt(2)=1.414
-			int roi_Y_OFFSET =	ss[0]/10;
+			int roi_Y_OFFSET =0;//	uss/10;
 			int roi_WIDTH = ss[0]/1.414f;
 			int roi_HEIGHT = ss[0]/1.414f + roi_Y_OFFSET;
+
+			if(roi_WIDTH & 0x1) roi_WIDTH++;	//odd to even
+			if(roi_HEIGHT & 0x1) roi_HEIGHT++;	//odd to even
 
 			//the ROI in the image
 			roi_face.x = cs[0] - roi_WIDTH/2;
 			roi_face.y = rs[0] - roi_HEIGHT/2 + roi_Y_OFFSET;
 			roi_face.width = roi_WIDTH;
 			roi_face.height = roi_HEIGHT ;
+			if(roi_face.x & 0x1) roi_face.x--;//odd to even
+			if(roi_face.y & 0x1) roi_face.y--;
+			LOGI("roi_face:x=%d, y=%d, w=%d, h=%d", roi_face.x, roi_face.y,
+				roi_face.width, roi_face.height);
 			*roi=roi_face;
 			*nface=1;	//only 1 face is returned
-			//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
-			//yuv_roi_to_rgb888(sfmt, roi_WIDTH, roi_HEIGHT, (unsigned char *)p, imagedata_rgb);
+
+			imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 4 * 3);//RGB888
+			croppedYUV = (unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 4 * 1.5);//YUV420sp
+			YUV420sp_Crop((unsigned char *)p, croppedYUV, width, height, roi_face);
+			yuv_to_rgb888(sfmt, roi_WIDTH, roi_HEIGHT, croppedYUV, imagedata_rgb);
 			//callback to facedetection with RECT
 			/*if(cblist.cbFaceDetected)
 				cblist.cbFaceDetected(1);*/
-		}else{//dummy ROI
-			int roi_WIDTH = (width>>2);	//160
-			int roi_HEIGHT = (height/3);	//160
-			int roi_Y_OFFSET =	(70);//(DEFAULT_HEIGHT/height);
-			roi_face.x = (width - roi_WIDTH)/2 - 1;
-			roi_face.y = (height - roi_HEIGHT)/2 - 1+ roi_Y_OFFSET;
-			roi_face.width = roi_WIDTH;
-			roi_face.height = roi_HEIGHT;
-			*nface=0;	//only 1 face is returned
-			//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
-			/*if(cblist.cbFaceDetected)
-				cblist.cbFaceDetected(0);*/
+
+			//MATRIX img={height, width, imagedata_rgb };
+			LOGI("roi=(x=%d,y=%d, w=%d,h=%d)", roi_face.x, roi_face.y, roi_face.width,
+				roi_face.height);
+			//RGB mean value in the RECT roi
+			//roiMean(MAX_CHANNELS, &img, roi_face, mean_roi);
+			rgb888_mean(roi_face.width, roi_face.height, imagedata_rgb, mean_roi);
+			//LOGI("mean_roi(%.4f,%.4f,%.4f)\n", mean_roi[0],mean_roi[1],mean_roi[2]);
+			if(imagedata_Y)
+				free(imagedata_Y);
+			if(imagedata_Y_1_4)
+				free(imagedata_Y_1_4);
+			}else{//dummy ROI
+				int roi_WIDTH = (width>>2);	//160
+				int roi_HEIGHT = (height/3);	//160
+				int roi_Y_OFFSET =	(70);//(DEFAULT_HEIGHT/height);
+				roi_face.x = (width - roi_WIDTH)/2 - 1;
+				roi_face.y = (height - roi_HEIGHT)/2 - 1+ roi_Y_OFFSET;
+				roi_face.width = roi_WIDTH;
+				roi_face.height = roi_HEIGHT;
+				*nface=0;	//only 1 face is returned
+				//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
+				/*if(cblist.cbFaceDetected)
+					cblist.cbFaceDetected(0);*/
 		}
-		MATRIX img={height, width, imagedata_rgb };
-		LOGI("roi=(x=%d,y=%d, w=%d,h=%d)", roi_face.x, roi_face.y, roi_face.width,
-			 roi_face.height);
-		//RGB mean value in the RECT roi
-		//roiMean(MAX_CHANNELS, &img, roi_face, mean_roi);
-		//LOGI("mean_roi(%.4f,%.4f,%.4f)\n", mean_roi[0],mean_roi[1],mean_roi[2]);
-		if(imagedata_Y)
-			free(imagedata_Y);
 	}
 
+#if 0
 	/*
-	 * YUV to RGB test
+	 * YUV420sp to RGB888 test
 	 */
 	imagedata_rgb=(unsigned char *)malloc(width * height * 3);//RGB888
 	yuv_to_rgb888(sfmt, height, width, (unsigned char *)p, imagedata_rgb);
@@ -285,6 +331,7 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 	char szFilename[100];
 	sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/yuv-%d.rgb", cnt++);
 	xwrite( szFilename, 0, imagedata_rgb, width*height*3);
+#endif
 
 	float pr=0.0f;
 	if(nd){
