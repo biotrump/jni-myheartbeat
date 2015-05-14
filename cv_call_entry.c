@@ -189,7 +189,9 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 {
 	float mean_roi[MAX_CHANNELS]={0.0};
 	float rs[MAX_FACES],cs[MAX_FACES],ss[MAX_FACES];
-	unsigned char *imagedata_rgb=NULL, *imagedata_Y=NULL, *croppedYUV=NULL;
+	unsigned char *imagedata_rgb=NULL;
+	unsigned char *imagedata_Y=NULL;
+	unsigned char *croppedYUV=NULL;
 	unsigned char *imagedata_Y_1_4=NULL;
 	RECT roi_face;
 	int nd=0;
@@ -204,19 +206,19 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 		(sfmt == V4L2_PIX_FMT_YUV422P)){
 
 		//LOGI("YUV422P YUYV");
-		imagedata_Y=(unsigned char *)malloc(width * height);
+		//imagedata_Y=(unsigned char *)malloc(width * height);
 		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
 		//LOGI("---YUV422P YUYV");
 	}else if( (sfmt == V4L2_PIX_FMT_UYVY) /*|| (sfmt == V4L2_PIX_FMT_VYUY)*/ ){
 		//LOGI("YUV422P UYVY");
-		imagedata_Y=(unsigned char *)malloc(width * height);
+		//imagedata_Y=(unsigned char *)malloc(width * height);
 		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
 		//LOGI("<<<YUV422P UYVY");
 	}else if( (sfmt == V4L2_PIX_FMT_YUV420) || (sfmt == V4L2_PIX_FMT_YVU420)){
 		//LOGI("YUV420 YVU420");
-		imagedata_Y=(unsigned char *)malloc(width * height);
+		//imagedata_Y=(unsigned char *)malloc(width * height);
 		//yuv_to_rgb888(sfmt, width, height, (unsigned char *)p, imagedata_rgb);
 		extractY(sfmt, width, height, (unsigned char *)p, imagedata_Y);
 		//LOGI("--YUV420 YVU420");
@@ -242,10 +244,10 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 		//			(unsigned char *)p, imagedata_Y_1_4);
 		downsampling_1_2( 'v',  0, -90, width, height,
 					(unsigned char *)p, imagedata_Y_1_4);
-		f_width=height/2;
+		f_width=height/2;/* after rotation, width and height are swapped */
 		f_height=width/2;
 		LOGI("w=%d, y=%d, fw=%d,fh=%d", width, height, f_width, f_height	);
-#if 1
+#if 0
 	/*
 	 * YUV420sp to RGB888 test
 	 */
@@ -287,37 +289,76 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 			*roi=roi_face;
 			*nface=1;	//only 1 face is returned
 
-			imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 4 * 3);//RGB888
-			croppedYUV = (unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 4 * 1.5);//YUV420sp
-			YUV420sp_Crop((unsigned char *)p, croppedYUV, width, height, roi_face);
-			yuv_to_rgb888(sfmt, roi_WIDTH, roi_HEIGHT, croppedYUV, imagedata_rgb);
+			RECT newROI;
+			int yuvs;
+			if(sfmt==V4L2_PIX_FMT_NV21){
+				//vflip + c-90
+				newROI.x = width - ((roi_face.y + roi_face.height)<<1);
+				newROI.y = (roi_face.x <<1);
+				newROI.width = roi_face.height << 1;
+				newROI.height = roi_face.width << 1;
+				/*newROI.x = 500;
+				newROI.y = 250;
+				newROI.width=400;
+				newROI.height = 400;*/
+				yuvs=(newROI.width * newROI.height  * 3) / 2;
+				imagedata_rgb=(unsigned char *)malloc(newROI.width * newROI.height * 3);//RGB888
+				//croppedYUV = (unsigned char *)malloc(roi_face.height * roi_face.width * (6) );//YUV420sp, 6 = 4*1.5
+				croppedYUV = (unsigned char *)malloc( yuvs );//YUV420sp, 6 = 4*1.5
+
+				YUV420sp_Crop((unsigned char *)p, croppedYUV, width, height, newROI);
+			}
+			yuv_to_rgb888(sfmt, newROI.width, newROI.height, croppedYUV, imagedata_rgb);
 			//callback to facedetection with RECT
 			/*if(cblist.cbFaceDetected)
 				cblist.cbFaceDetected(1);*/
-
+#if 1
+	/*
+	 * YUV420sp to RGB888 test
+	 */
+	//imagedata_rgb=(unsigned char *)malloc(width * height * 3);//RGB888
+	//yuv_to_rgb888(sfmt, height, width, (unsigned char *)p, imagedata_rgb);
+	static int cnt=0;
+	char szFilename[200];
+	LOGI("cnt=%d, yuvs=%d", cnt, yuvs);
+	sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/CropYUV2RGB-%dx%d-%d.rgb",
+			newROI.width, newROI.height, cnt);
+	xwrite( szFilename, 0, imagedata_rgb, newROI.width*newROI.height*3);
+	sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/CropYUV-%dx%d-%d.y",
+			newROI.width, newROI.height, cnt);
+	xwrite( szFilename, 0, croppedYUV, yuvs);
+	sprintf(szFilename, "/mnt/sdcard/DCIM/100ANDRO/p-%d.yuv",
+			cnt);
+	xwrite( szFilename, 0, (unsigned char *)p, (int)(width*height*1.5));
+	cnt++;
+#endif
 			//MATRIX img={height, width, imagedata_rgb };
-			LOGI("roi=(x=%d,y=%d, w=%d,h=%d)", roi_face.x, roi_face.y, roi_face.width,
-				roi_face.height);
+			LOGI("roi=(nx=%d,ny=%d, nw=%d,nh=%d)", newROI.x, newROI.y, newROI.width,
+				newROI.height);
 			//RGB mean value in the RECT roi
 			//roiMean(MAX_CHANNELS, &img, roi_face, mean_roi);
-			rgb888_mean(roi_face.width, roi_face.height, imagedata_rgb, mean_roi);
-			//LOGI("mean_roi(%.4f,%.4f,%.4f)\n", mean_roi[0],mean_roi[1],mean_roi[2]);
+			rgb888_mean(newROI.width, newROI.height, imagedata_rgb, mean_roi);
+			LOGI("mean_roi(%.4f,%.4f,%.4f)\n", mean_roi[0],mean_roi[1],mean_roi[2]);
 			if(imagedata_Y)
 				free(imagedata_Y);
 			if(imagedata_Y_1_4)
 				free(imagedata_Y_1_4);
-			}else{//dummy ROI
-				int roi_WIDTH = (width>>2);	//160
-				int roi_HEIGHT = (height/3);	//160
-				int roi_Y_OFFSET =	(70);//(DEFAULT_HEIGHT/height);
-				roi_face.x = (width - roi_WIDTH)/2 - 1;
-				roi_face.y = (height - roi_HEIGHT)/2 - 1+ roi_Y_OFFSET;
-				roi_face.width = roi_WIDTH;
-				roi_face.height = roi_HEIGHT;
-				*nface=0;	//only 1 face is returned
-				//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
-				/*if(cblist.cbFaceDetected)
-					cblist.cbFaceDetected(0);*/
+			if(imagedata_rgb)
+				free(imagedata_rgb);
+			if(croppedYUV)
+				free(croppedYUV);
+		}else{//dummy ROI
+			int roi_WIDTH = (width>>2);	//160
+			int roi_HEIGHT = (height/3);	//160
+			int roi_Y_OFFSET =	(70);//(DEFAULT_HEIGHT/height);
+			roi_face.x = (width - roi_WIDTH)/2 - 1;
+			roi_face.y = (height - roi_HEIGHT)/2 - 1+ roi_Y_OFFSET;
+			roi_face.width = roi_WIDTH;
+			roi_face.height = roi_HEIGHT;
+			*nface=0;	//only 1 face is returned
+			//imagedata_rgb=(unsigned char *)malloc(roi_WIDTH * roi_HEIGHT * 3);//RGB888
+			/*if(cblist.cbFaceDetected)
+				cblist.cbFaceDetected(0);*/
 		}
 	}
 
@@ -343,8 +384,6 @@ float processFrame(unsigned sfmt, const void *p, int width, int height,
 			pr = ppg[2];//return G's bpm
 		}
 	}
-	if(imagedata_rgb)
-		free(imagedata_rgb);
 
 	return pr;
 }
